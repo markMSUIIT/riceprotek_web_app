@@ -42,7 +42,6 @@ st.set_page_config(
 
 # Sidebar - Logo and Navigation
 st.sidebar.image("riceprotek_icon.png", use_container_width=True)
-st.sidebar.markdown('<div class="sidebar-header">🐛 Navigation</div>', unsafe_allow_html=True)
 
 # Initialize database
 init_database()
@@ -225,128 +224,204 @@ display_user_profile()
 if page == "Dashboard":
     # Modern header
     st.markdown("""
-    <div style='padding: 30px; border-radius: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; margin-bottom: 30px;'>
-        <h1 style='margin: 0; font-size: 2.8em; font-weight: 800;'>🐛 RiceProTek Dashboard</h1>
-        <p style='margin: 10px 0 0 0; font-size: 1.1em; opacity: 0.95;'>Real-time pest management monitoring system</p>
+    <div style='padding: 30px; border-radius: 15px; background: linear-gradient(135deg, #2E7D32 0%, #1B5E20 100%); color: white; margin-bottom: 30px; box-shadow: 0 4px 15px rgba(46, 125, 50, 0.3);'>
+        <h1 style='margin: 0; font-size: 2.8em; font-weight: 800;'>🌾 RiceProTek Dashboard</h1>
+        <p style='margin: 10px 0 0 0; font-size: 1.1em; opacity: 0.95;'>Intelligent Pest Management & Environmental Monitoring</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Get current user info
     current_user = get_current_user()
-    user_name = current_user.get('name', 'Administrator') if current_user else 'User'
+    user_name = current_user.get('username', 'User') if current_user else 'User'
+    
+    # Welcome message
+    st.markdown(f"### 👋 Welcome back, **{user_name}**!")
+    st.markdown("---")
     
     # Load data
     pest_df = read_records("pest_records")
     monitoring_points_df = read_records("monitoring_points")
     
-    # Key Statistics Cards - Enhanced
-    st.markdown("""
-    <div style='padding: 20px; border-radius: 15px; background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);'>
-        <h3 style='margin-top: 0; color: #111827;'>📊 Key Metrics</h3>
-    </div>
-    """, unsafe_allow_html=True)
+    # Calculate insights
+    total_rbb = int(pest_df['rbb_count'].sum()) if len(pest_df) > 0 and 'rbb_count' in pest_df.columns else 0
+    total_wsb = int(pest_df['wsb_count'].sum()) if len(pest_df) > 0 and 'wsb_count' in pest_df.columns else 0
+    total_pests = total_rbb + total_wsb
     
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    # Calculate trend (last 7 days vs previous 7 days if date column exists)
+    rbb_trend = 0
+    wsb_trend = 0
+    if len(pest_df) > 0 and 'date' in pest_df.columns:
+        try:
+            pest_df['date'] = pd.to_datetime(pest_df['date'])
+            recent_data = pest_df[pest_df['date'] >= (pd.Timestamp.now() - pd.Timedelta(days=7))]
+            older_data = pest_df[(pest_df['date'] >= (pd.Timestamp.now() - pd.Timedelta(days=14))) & 
+                                (pest_df['date'] < (pd.Timestamp.now() - pd.Timedelta(days=7)))]
+            
+            recent_rbb = recent_data['rbb_count'].sum() if 'rbb_count' in recent_data.columns else 0
+            older_rbb = older_data['rbb_count'].sum() if 'rbb_count' in older_data.columns else 0
+            rbb_trend = ((recent_rbb - older_rbb) / older_rbb * 100) if older_rbb > 0 else 0
+            
+            recent_wsb = recent_data['wsb_count'].sum() if 'wsb_count' in recent_data.columns else 0
+            older_wsb = older_data['wsb_count'].sum() if 'wsb_count' in older_data.columns else 0
+            wsb_trend = ((recent_wsb - older_wsb) / older_wsb * 100) if older_wsb > 0 else 0
+        except:
+            pass
     
-    col1, col2, col3 = st.columns(3)
+    # Key Performance Indicators
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.markdown(f"""
-            <div style='padding: 20px; border-radius: 12px; background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%); border-top: 4px solid #1e3a8a;'>
-                <p style='margin: 0; color: #e0e7ff; font-size: 0.85em;'>Total Pest Records</p>
-                <h2 style='margin: 10px 0 0 0; color: white; font-size: 2.5em; font-weight: 800;'>{len(pest_df)}</h2>
-            </div>
-        """, unsafe_allow_html=True)
+        trend_icon = "📈" if rbb_trend > 0 else "📉" if rbb_trend < 0 else "➡️"
+        trend_color = "#ef4444" if rbb_trend > 0 else "#10b981" if rbb_trend < 0 else "#6b7280"
+        st.metric(
+            label="🐛 Rice Black Bug",
+            value=f"{total_rbb:,}",
+            delta=f"{rbb_trend:+.1f}%" if rbb_trend != 0 else "No change",
+            delta_color="inverse"
+        )
     
     with col2:
-        st.markdown(f"""
-            <div style='padding: 20px; border-radius: 12px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-top: 4px solid #92400e;'>
-                <p style='margin: 0; color: #fef3c7; font-size: 0.85em;'>Monitoring Points</p>
-                <h2 style='margin: 10px 0 0 0; color: white; font-size: 2.5em; font-weight: 800;'>{len(monitoring_points_df)}</h2>
-            </div>
-        """, unsafe_allow_html=True)
+        trend_icon = "📈" if wsb_trend > 0 else "📉" if wsb_trend < 0 else "➡️"
+        trend_color = "#ef4444" if wsb_trend > 0 else "#10b981" if wsb_trend < 0 else "#6b7280"
+        st.metric(
+            label="🦗 White Stem Borer",
+            value=f"{total_wsb:,}",
+            delta=f"{wsb_trend:+.1f}%" if wsb_trend != 0 else "No change",
+            delta_color="inverse"
+        )
     
     with col3:
-        st.markdown(f"""
-            <div style='padding: 20px; border-radius: 12px; background: linear-gradient(135deg, #ec4899 0%, #db2777 100%); border-top: 4px solid #831843;'>
-                <p style='margin: 0; color: #fbcfe8; font-size: 0.85em;'>System Status</p>
-                <h2 style='margin: 10px 0 0 0; color: white; font-size: 2.5em; font-weight: 800;'>🟢 Active</h2>
+        st.metric(
+            label="📊 Total Records",
+            value=f"{len(pest_df):,}",
+            delta=f"{len(pest_df)} entries"
+        )
+    
+    with col4:
+        st.metric(
+            label="📍 Monitoring Sites",
+            value=f"{len(monitoring_points_df):,}",
+            delta="Active" if len(monitoring_points_df) > 0 else "None"
+        )
+    
+    st.markdown("---")
+    
+    # Data visualizations and insights
+    if len(pest_df) > 0:
+        col_left, col_right = st.columns([2, 1])
+        
+        with col_left:
+            st.markdown("### 📈 Pest Population Trends")
+            
+            # Create trend chart if data is available
+            if 'date' in pest_df.columns:
+                pest_df_processed = process_pest_data(pest_df)
+                if len(pest_df_processed) > 0:
+                    fig = create_pest_trend_chart(pest_df_processed)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Not enough data to display trends. Add more records with dates.")
+            else:
+                st.info("Date information not available. Add dates to pest records for trend analysis.")
+        
+        with col_right:
+            st.markdown("### 🎯 Pest Distribution")
+            
+            # Pie chart for pest distribution
+            import plotly.graph_objects as go
+            
+            fig = go.Figure(data=[go.Pie(
+                labels=['Rice Black Bug', 'White Stem Borer'],
+                values=[total_rbb, total_wsb],
+                hole=0.4,
+                marker=dict(colors=['#ef4444', '#f59e0b']),
+                textinfo='label+percent',
+                textfont=dict(size=14)
+            )])
+            
+            fig.update_layout(
+                title=None,
+                height=300,
+                showlegend=True,
+                margin=dict(l=20, r=20, t=20, b=20)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Alert status
+            st.markdown("### ⚠️ Alert Status")
+            if total_pests > 100:
+                st.error("🚨 **High Alert**: Pest population exceeds threshold!")
+            elif total_pests > 50:
+                st.warning("⚠️ **Medium Alert**: Monitor pest levels closely.")
+            else:
+                st.success("✅ **Normal**: Pest levels under control.")
+        
+        # Recent activity and statistics
+        st.markdown("---")
+        st.markdown("### 📊 Detailed Statistics")
+        
+        stat_col1, stat_col2, stat_col3 = st.columns(3)
+        
+        with stat_col1:
+            avg_rbb = pest_df['rbb_count'].mean() if 'rbb_count' in pest_df.columns else 0
+            st.markdown(f"""
+            <div style='padding: 20px; background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-radius: 12px; border-left: 4px solid #dc2626;'>
+                <h4 style='margin: 0 0 10px 0; color: #7f1d1d;'>🐛 RBB Analysis</h4>
+                <p style='margin: 5px 0; color: #991b1b;'><strong>Average:</strong> {avg_rbb:.1f} per record</p>
+                <p style='margin: 5px 0; color: #991b1b;'><strong>Total:</strong> {total_rbb:,}</p>
+                <p style='margin: 5px 0; color: #991b1b;'><strong>Max:</strong> {int(pest_df['rbb_count'].max()) if 'rbb_count' in pest_df.columns else 0}</p>
             </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
-    
-    # System Overview Section
-    st.markdown("""
-    <div style='padding: 20px; border-radius: 15px; background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);'>
-        <h3 style='margin-top: 0; color: #111827;'>📈 System Overview</h3>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-    
-    info_col1, info_col2 = st.columns(2)
-    
-    with info_col1:
-        if len(pest_df) > 0:
-            pest_df_processed = process_pest_data(pest_df)
-            summary_stats = get_summary_statistics(pest_df_processed, 'rbb_count')
-            
-            total_rbb = pest_df['rbb_count'].sum() if 'rbb_count' in pest_df.columns else 0
-            total_wsb = pest_df['wsb_count'].sum() if 'wsb_count' in pest_df.columns else 0
-            
-            st.markdown(f"""
-                <div style='padding: 20px; border-radius: 12px; background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-left: 4px solid #0284c7;'>
-                    <h4 style='color: #0c4a6e; margin: 0 0 15px 0;'>🐛 Pest Summary</h4>
-                    <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 10px;'>
-                        <div><p style='margin: 0; color: #0c4a6e; font-size: 0.9em;'><strong>RBB Count:</strong></p><p style='margin: 5px 0 0 0; color: #0284c7; font-size: 1.3em; font-weight: 700;'>{int(total_rbb)}</p></div>
-                        <div><p style='margin: 0; color: #0c4a6e; font-size: 0.9em;'><strong>WSB Count:</strong></p><p style='margin: 5px 0 0 0; color: #0284c7; font-size: 1.3em; font-weight: 700;'>{int(total_wsb)}</p></div>
-                    </div>
-                </div>
             """, unsafe_allow_html=True)
-        else:
-            st.info("📌 No pest records available yet. Start by adding data in the Pest Records section.")
-    
-    with info_col2:
-        if len(monitoring_points_df) > 0:
+        
+        with stat_col2:
+            avg_wsb = pest_df['wsb_count'].mean() if 'wsb_count' in pest_df.columns else 0
             st.markdown(f"""
-                <div style='padding: 20px; border-radius: 12px; background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-left: 4px solid #059669;'>
-                    <h4 style='color: #064e3b; margin: 0 0 15px 0;'>📍 Monitoring Coverage</h4>
-                    <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 10px;'>
-                        <div><p style='margin: 0; color: #064e3b; font-size: 0.9em;'><strong>Active Points:</strong></p><p style='margin: 5px 0 0 0; color: #059669; font-size: 1.3em; font-weight: 700;'>{len(monitoring_points_df)}</p></div>
-                        <div><p style='margin: 0; color: #064e3b; font-size: 0.9em;'><strong>Status:</strong></p><p style='margin: 5px 0 0 0; color: #059669; font-size: 1em; font-weight: 600;'>✓ Ready</p></div>
-                    </div>
-                </div>
+            <div style='padding: 20px; background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-radius: 12px; border-left: 4px solid #d97706;'>
+                <h4 style='margin: 0 0 10px 0; color: #78350f;'>🦗 WSB Analysis</h4>
+                <p style='margin: 5px 0; color: #92400e;'><strong>Average:</strong> {avg_wsb:.1f} per record</p>
+                <p style='margin: 5px 0; color: #92400e;'><strong>Total:</strong> {total_wsb:,}</p>
+                <p style='margin: 5px 0; color: #92400e;'><strong>Max:</strong> {int(pest_df['wsb_count'].max()) if 'wsb_count' in pest_df.columns else 0}</p>
+            </div>
             """, unsafe_allow_html=True)
-        else:
-            st.info("📌 No monitoring points configured. Add monitoring points to begin environmental tracking.")
+        
+        with stat_col3:
+            unique_areas = pest_df['area'].nunique() if 'area' in pest_df.columns else 0
+            st.markdown(f"""
+            <div style='padding: 20px; background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-radius: 12px; border-left: 4px solid #2563eb;'>
+                <h4 style='margin: 0 0 10px 0; color: #1e3a8a;'>📍 Coverage</h4>
+                <p style='margin: 5px 0; color: #1e40af;'><strong>Areas Monitored:</strong> {unique_areas}</p>
+                <p style='margin: 5px 0; color: #1e40af;'><strong>Total Points:</strong> {len(monitoring_points_df)}</p>
+                <p style='margin: 5px 0; color: #1e40af;'><strong>Records:</strong> {len(pest_df)}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+    else:
+        st.info("📊 **No data available yet.** Start by adding pest records to see meaningful insights and analytics.")
     
-    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
+    st.markdown("---")
     
     # Quick Actions
-    st.markdown("""
-    <div style='padding: 20px; border-radius: 15px; background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);'>
-        <h3 style='margin-top: 0; color: #111827;'>⚡ Quick Actions</h3>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("### ⚡ Quick Actions")
     
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-    
-    quick_col1, quick_col2, quick_col3 = st.columns(3)
+    quick_col1, quick_col2, quick_col3, quick_col4 = st.columns(4)
     
     with quick_col1:
-        if st.button("📋 Add Pest Record", use_container_width=True, key="quick_pest"):
-            st.session_state.quick_action = "pest_record"
+        if st.button("📋 Add Pest Record", use_container_width=True, key="quick_pest", type="primary"):
+            st.switch_page  # Will be handled by navigation
+            st.info("Navigate to 'Pest Records' to add new data")
     
     with quick_col2:
-        if st.button("📍 Add Monitoring Point", use_container_width=True, key="quick_monitor"):
-            st.session_state.quick_action = "monitoring_point"
+        if st.button("📊 View Analytics", use_container_width=True, key="quick_analytics"):
+            st.info("Navigate to 'Analytics' for detailed insights")
     
     with quick_col3:
-        if st.button("🌡️ View Environmental Data", use_container_width=True, key="quick_env"):
-            st.session_state.quick_action = "environment"
+        if st.button("🗺️ Area Analysis", use_container_width=True, key="quick_area"):
+            st.info("Navigate to 'Area Analysis' to compare locations")
     
-    st.divider()
+    with quick_col4:
+        if st.button("🌡️ Environmental Data", use_container_width=True, key="quick_env"):
+            st.info("Navigate to 'NASA POWER Data' for climate info")
 
 # ============================================================================
 # MONITORING POINTS PAGE - Admin and Encoder only

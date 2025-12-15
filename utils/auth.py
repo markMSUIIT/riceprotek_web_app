@@ -44,6 +44,7 @@ def login_with_google():
             background-color: #f5f5f5;
         }
         .login-container {
+            display:none;
             max-width: 450px;
             margin: 0 auto;
             padding: 50px 40px;
