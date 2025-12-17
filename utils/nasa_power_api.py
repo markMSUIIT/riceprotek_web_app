@@ -372,3 +372,132 @@ def generate_mock_nasa_data(start_date, end_date, latitude=None, longitude=None,
     df["Date"] = pd.to_datetime(df["Date"])
     
     return df
+
+# ============================================================================
+# AREA POINT VALIDATION & SAVING FUNCTIONS
+# ============================================================================
+
+def validate_nasa_data_for_save(data_df, area_point_id):
+    """
+    Validate NASA POWER data before saving to database
+    Enforces area_point_id requirement
+    """
+    errors = []
+    
+    # Check area_point_id
+    if not area_point_id or area_point_id.strip() == "":
+        errors.append("Area Point ID is required - cannot save data without selecting an area point")
+    
+    # Check if dataframe is empty
+    if data_df is None or len(data_df) == 0:
+        errors.append("No data to save")
+    
+    # Check required columns
+    if 'Date' not in data_df.columns:
+        errors.append("Date column is missing")
+    
+    # Check for at least one environmental variable
+    env_vars = ['T2M', 'RH2M', 'PRECTOTCORR', 'WS2M']
+    has_env_var = any(var in data_df.columns for var in env_vars)
+    if not has_env_var:
+        errors.append("No environmental variables found in data")
+    
+    return {
+        'valid': len(errors) == 0,
+        'errors': errors
+    }
+
+def prepare_nasa_data_for_db(data_df, area_point_id, created_by):
+    """
+    Prepare NASA POWER data for database insertion
+    Transforms DataFrame to match environmental_data table schema
+    """
+    from utils.database import validate_area_point_exists
+    
+    # Validate area point exists
+    validate_area_point_exists(area_point_id)
+    
+    records = []
+    
+    for _, row in data_df.iterrows():
+        record = {
+            'area_point_id': area_point_id,
+            'date': row['Date'].strftime('%Y-%m-%d') if isinstance(row['Date'], pd.Timestamp) else str(row['Date']),
+            'source': 'nasa_power',
+            'created_by': created_by
+        }
+        
+        # Map NASA POWER columns to database columns
+        column_mapping = {
+            'T2M': 'temperature',
+            'T2M_MIN': 't2m_min',
+            'T2M_MAX': 't2m_max',
+            'RH2M': 'humidity',
+            'PRECTOTCORR': 'precipitation',
+            'WS2M': 'wind_speed',
+            'WS2M_MAX': 'wind_speed_max',
+            'WS2M_MIN': 'wind_speed_min',
+            'WD2M': 'wind_direction',
+            'CLRSKY_SFC_PAR_TOT': 'solar_radiation',
+            'ALLSKY_SFC_UVA': 'uva',
+            'ALLSKY_SFC_UVB': 'uvb',
+            'GWETTOP': 'gwettop'
+        }
+        
+        for nasa_col, db_col in column_mapping.items():
+            if nasa_col in row and pd.notna(row[nasa_col]):
+                record[db_col] = float(row[nasa_col])
+        
+        records.append(record)
+    
+    return records
+
+def save_nasa_data_to_db(data_df, area_point_id, created_by):
+    """
+    Save NASA POWER data to database with validation
+    Returns success/failure counts
+    """
+    from utils.database import create_environmental_data, log_activity
+    
+    # Validate before saving
+    validation = validate_nasa_data_for_save(data_df, area_point_id)
+    if not validation['valid']:
+        raise ValueError(f"Validation failed: {', '.join(validation['errors'])}")
+    
+    # Prepare records
+    records = prepare_nasa_data_for_db(data_df, area_point_id, created_by)
+    
+    success_count = 0
+    errors = []
+    
+    for record in records:
+        try:
+            create_environmental_data(record)
+            success_count += 1
+        except Exception as e:
+            errors.append({
+                'date': record['date'],
+                'error': str(e)
+            })
+    
+    # Log activity
+    log_activity(
+        user=created_by,
+        action='import',
+        module='environmental',
+        entity_type='environmental_data',
+        entity_id=area_point_id,
+        details={
+            'source': 'nasa_power',
+            'success_count': success_count,
+            'error_count': len(errors),
+            'total_records': len(records)
+        }
+    )
+    
+    return {
+        'success': success_count,
+        'failed': len(errors),
+        'errors': errors,
+        'total': len(records)
+    }

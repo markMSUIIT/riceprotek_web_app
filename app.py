@@ -192,12 +192,25 @@ st.markdown("""
 user = get_current_user()
 
 # Build navigation menu based on role
-nav_options = ["Dashboard", "Area Analysis", "Pest Records", "Monitoring Points", "NASA POWER Data", "Analytics", "Settings"]
+nav_options = [
+    "Dashboard",
+    "📍 Area Points",
+    "📤 Dataset Upload",
+    "Area Analysis",
+    "Pest Records",
+    "🌡️ Environmental Data",
+    "Monitoring Points",
+    "NASA POWER Data",
+    "📊 Visualizations",
+    "Analytics",
+    "Settings"
+]
 
-# Add User Management for super_admin and admin only
+# Add Admin-only sections
 if user and can_manage_users(user):
     nav_options.insert(3, "User Management")
     nav_options.insert(4, "Insects Management")
+    nav_options.append("📋 Activity Logs")
 
 page = st.sidebar.radio(
     "Select a section:",
@@ -422,6 +435,428 @@ if page == "Dashboard":
     with quick_col4:
         if st.button("🌡️ Environmental Data", use_container_width=True, key="quick_env"):
             st.info("Navigate to 'NASA POWER Data' for climate info")
+
+# ============================================================================
+# AREA POINTS PAGE - Admin and Encoder only
+# ============================================================================
+elif page == "📍 Area Points":
+    from utils.database import (
+        create_area_point, get_area_points, get_area_point_by_id,
+        update_area_point, delete_area_point, log_activity
+    )
+    
+    st.markdown("## 📍 Area Points Management")
+    st.markdown("Area Points are **mandatory** locations where pest and environmental data are collected.")
+    st.info("⚠️ **Important**: You must create Area Points before adding any pest or environmental data.")
+    
+    # Role-based access control
+    if user['role'] not in ['super_admin', 'admin', 'encoder']:
+        st.error("❌ Access Denied! Only Super Admin, Admin, and Encoder can manage area points.")
+        st.stop()
+    
+    # Tabs for different operations
+    tab1, tab2, tab3 = st.tabs(["📋 View Area Points", "➕ Add New", "✏️ Edit/Delete"])
+    
+    # TAB 1: View Area Points
+    with tab1:
+        st.markdown("### Current Area Points")
+        
+        # Filters
+        col1, col2 = st.columns(2)
+        with col1:
+            show_inactive = st.checkbox("Show inactive area points", value=False)
+        
+        # Get area points
+        area_points_df = get_area_points(active_only=not show_inactive)
+        
+        if len(area_points_df) > 0:
+            st.markdown(f"**Total Area Points:** {len(area_points_df)}")
+            
+            # Display as table
+            display_df = area_points_df[[
+                'area_point_id', 'name', 'latitude', 'longitude', 
+                'cluster', 'municipality', 'is_active', 'created_at'
+            ]]
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            # Export option
+            csv = area_points_df.to_csv(index=False)
+            st.download_button(
+                "📥 Download as CSV",
+                csv,
+                "area_points.csv",
+                "text/csv",
+                key='download-area-points'
+            )
+        else:
+            st.warning("No area points found. Add your first area point in the 'Add New' tab.")
+    
+    # TAB 2: Add New Area Point
+    with tab2:
+        st.markdown("### Add New Area Point")
+        
+        with st.form("add_area_point_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                area_point_id = st.text_input(
+                    "Area Point ID*",
+                    placeholder="e.g., LOT_A, FIELD_64",
+                    help="Unique identifier for this location"
+                )
+                name = st.text_input(
+                    "Name*",
+                    placeholder="e.g., Rice Field A",
+                    help="Descriptive name"
+                )
+                latitude = st.number_input(
+                    "Latitude*",
+                    min_value=-90.0,
+                    max_value=90.0,
+                    value=7.178,
+                    format="%.6f",
+                    help="Decimal degrees"
+                )
+                longitude = st.number_input(
+                    "Longitude*",
+                    min_value=-180.0,
+                    max_value=180.0,
+                    value=124.5006,
+                    format="%.6f",
+                    help="Decimal degrees"
+                )
+            
+            with col2:
+                cluster = st.number_input("Cluster", min_value=0, value=0)
+                municipality = st.text_input("Municipality", placeholder="Optional")
+                barangay = st.text_input("Barangay", placeholder="Optional")
+                description = st.text_area("Description", placeholder="Additional details...")
+            
+            submitted = st.form_submit_button("➕ Add Area Point", type="primary", use_container_width=True)
+            
+            if submitted:
+                # Validation
+                if not area_point_id or not name:
+                    st.error("❌ Area Point ID and Name are required!")
+                elif not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+                    st.error("❌ Invalid coordinates!")
+                else:
+                    try:
+                        data = {
+                            'area_point_id': area_point_id.strip(),
+                            'name': name.strip(),
+                            'latitude': latitude,
+                            'longitude': longitude,
+                            'cluster': cluster,
+                            'municipality': municipality.strip() if municipality else None,
+                            'barangay': barangay.strip() if barangay else None,
+                            'description': description.strip() if description else None,
+                            'created_by': user['username']
+                        }
+                        
+                        point_id = create_area_point(data)
+                        
+                        # Log activity
+                        log_activity(
+                            user=user['username'],
+                            action='create',
+                            module='area_point',
+                            entity_type='area_points',
+                            entity_id=area_point_id,
+                            details={'name': name}
+                        )
+                        
+                        st.success(f"✅ Area Point '{area_point_id}' created successfully!")
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(f"❌ Error: {str(e)}")
+                    except Exception as e:
+                        st.error(f"❌ Failed to create area point: {str(e)}")
+    
+    # TAB 3: Edit/Delete
+    with tab3:
+        st.markdown("### Edit or Delete Area Point")
+        
+        # Get all area points
+        all_points = get_area_points(active_only=False)
+        
+        if len(all_points) > 0:
+            # Select area point to edit
+            point_ids = all_points['area_point_id'].tolist()
+            selected_id = st.selectbox("Select Area Point", point_ids)
+            
+            if selected_id:
+                point = get_area_point_by_id(selected_id)
+                
+                if point:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("#### Edit Details")
+                        with st.form("edit_area_point_form"):
+                            new_name = st.text_input("Name", value=point['name'])
+                            new_lat = st.number_input("Latitude", value=float(point['latitude']), format="%.6f")
+                            new_lon = st.number_input("Longitude", value=float(point['longitude']), format="%.6f")
+                            new_cluster = st.number_input("Cluster", value=int(point.get('cluster', 0)))
+                            new_municipality = st.text_input("Municipality", value=point.get('municipality', ''))
+                            new_barangay = st.text_input("Barangay", value=point.get('barangay', ''))
+                            new_description = st.text_area("Description", value=point.get('description', ''))
+                            
+                            update_submitted = st.form_submit_button("💾 Update", type="primary", use_container_width=True)
+                            
+                            if update_submitted:
+                                try:
+                                    update_data = {
+                                        'name': new_name,
+                                        'latitude': new_lat,
+                                        'longitude': new_lon,
+                                        'cluster': new_cluster,
+                                        'municipality': new_municipality,
+                                        'barangay': new_barangay,
+                                        'description': new_description
+                                    }
+                                    
+                                    update_area_point(selected_id, update_data)
+                                    
+                                    # Log activity
+                                    log_activity(
+                                        user=user['username'],
+                                        action='update',
+                                        module='area_point',
+                                        entity_type='area_points',
+                                        entity_id=selected_id,
+                                        details={'fields_updated': list(update_data.keys())}
+                                    )
+                                    
+                                    st.success(f"✅ Area Point '{selected_id}' updated successfully!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Update failed: {str(e)}")
+                    
+                    with col2:
+                        st.markdown("#### Danger Zone")
+                        st.warning("⚠️ Deactivating an area point will prevent new data from being added to it.")
+                        
+                        if point.get('is_active', 1):
+                            if st.button("🚫 Deactivate Area Point", type="secondary", use_container_width=True):
+                                try:
+                                    delete_area_point(selected_id)
+                                    
+                                    # Log activity
+                                    log_activity(
+                                        user=user['username'],
+                                        action='delete',
+                                        module='area_point',
+                                        entity_type='area_points',
+                                        entity_id=selected_id,
+                                        details={'action': 'deactivated'}
+                                    )
+                                    
+                                    st.success(f"✅ Area Point '{selected_id}' deactivated.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Deactivation failed: {str(e)}")
+                        else:
+                            st.info("This area point is already inactive.")
+        else:
+            st.info("No area points available. Add your first area point in the 'Add New' tab.")
+
+# ============================================================================
+# DATASET UPLOAD PAGE - Admin and Encoder only
+# ============================================================================
+elif page == "📤 Dataset Upload":
+    from utils.database import create_dataset_upload, update_dataset_upload, log_activity, get_area_points
+    from utils.data_processing import (
+        validate_pest_dataset, chop_dataset_by_domain, normalize_column_names,
+        prepare_for_database
+    )
+    from utils.pest_management import bulk_import_pest_data
+    from utils.database import bulk_create_environmental_data
+    
+    st.markdown("## 📤 Dataset Upload & Processing")
+    st.markdown("Upload CSV files containing pest and environmental data for processing.")
+    
+    # Role-based access control
+    if user['role'] not in ['super_admin', 'admin', 'encoder']:
+        st.error("❌ Access Denied! Only Super Admin, Admin, and Encoder can upload datasets.")
+        st.stop()
+    
+    st.info("ℹ️ **Required**: Select an Area Point before uploading. All data will be associated with this location.")
+    
+    # Area Point Selection (MANDATORY)
+    area_points_df = get_area_points()
+    
+    if len(area_points_df) == 0:
+        st.error("❌ No area points available! Please create an area point first in the '📍 Area Points' page.")
+        st.stop()
+    
+    area_point_options = {row['area_point_id']: f"{row['name']} ({row['area_point_id']})" 
+                         for _, row in area_points_df.iterrows()}
+    
+    selected_area_point = st.selectbox(
+        "Select Area Point* (Where was this data collected?)",
+        options=list(area_point_options.keys()),
+        format_func=lambda x: area_point_options[x],
+        help="Data will be linked to this location"
+    )
+    
+    if not selected_area_point:
+        st.warning("⚠️ Please select an area point to continue.")
+        st.stop()
+    
+    st.success(f"✅ Selected: {area_point_options[selected_area_point]}")
+    
+    st.markdown("---")
+    
+    # File Upload
+    uploaded_file = st.file_uploader(
+        "Upload CSV File",
+        type=['csv'],
+        help="Upload a CSV file with pest and environmental data"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            # Read CSV
+            df = pd.read_csv(uploaded_file)
+            
+            st.markdown("### 📋 Dataset Preview")
+            st.markdown(f"**Rows:** {len(df)} | **Columns:** {len(df.columns)}")
+            st.dataframe(df.head(10), use_container_width=True)
+            
+            # Normalize column names
+            df_normalized = normalize_column_names(df)
+            
+            # Validation
+            st.markdown("### ✅ Validation")
+            validation_result = validate_pest_dataset(df_normalized)
+            
+            if validation_result['valid']:
+                st.success("✅ Dataset validation passed!")
+            else:
+                st.error("❌ Validation failed:")
+                for error in validation_result['errors']:
+                    st.error(f"  • {error}")
+            
+            if validation_result.get('warnings'):
+                st.warning("⚠️ Warnings:")
+                for warning in validation_result['warnings']:
+                    st.warning(f"  • {warning}")
+            
+            # Domain Chopping
+            if validation_result['valid']:
+                st.markdown("### 📦 Domain Splitting")
+                
+                domains = chop_dataset_by_domain(df_normalized)
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Environmental Records", len(domains['environmental']))
+                with col2:
+                    st.metric("Pest Records", len(domains['pest']))
+                with col3:
+                    st.metric("Metadata Records", len(domains['metadata']))
+                
+                # Process and Import
+                st.markdown("### 🚀 Import Data")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    import_environmental = st.checkbox("Import Environmental Data", value=True)
+                with col2:
+                    import_pest = st.checkbox("Import Pest Data", value=True)
+                
+                if st.button("🚀 Process and Import Dataset", type="primary", use_container_width=True):
+                    with st.spinner("Processing dataset..."):
+                        # Create upload record
+                        upload_data = {
+                            'filename': f"{selected_area_point}_{uploaded_file.name}",
+                            'original_filename': uploaded_file.name,
+                            'uploader': user['username'],
+                            'row_count': len(df),
+                            'validation_status': 'valid' if validation_result['valid'] else 'invalid',
+                            'validation_errors': str(validation_result.get('errors', [])),
+                            'file_size': uploaded_file.size,
+                            'columns_detected': str(list(df.columns)),
+                            'processing_status': 'processing'
+                        }
+                        
+                        upload_id = create_dataset_upload(upload_data)
+                        
+                        results = {'environmental': None, 'pest': None}
+                        
+                        # Import Environmental Data
+                        if import_environmental and len(domains['environmental']) > 0:
+                            env_prepared = prepare_for_database(
+                                domains['environmental'],
+                                selected_area_point,
+                                user['username']
+                            )
+                            
+                            env_records = []
+                            for _, row in env_prepared.iterrows():
+                                record = {
+                                    'area_point_id': selected_area_point,
+                                    'date': row.get('date'),
+                                    'source': 'manual',
+                                    'temperature': row.get('T2M'),
+                                    't2m_min': row.get('T2M_MIN'),
+                                    't2m_max': row.get('T2M_MAX'),
+                                    'humidity': row.get('RH2M'),
+                                    'precipitation': row.get('PRECTOTCORR'),
+                                    'wind_speed': row.get('WS2M'),
+                                    'wind_speed_max': row.get('WS2M_MAX'),
+                                    'wind_speed_min': row.get('WS2M_MIN'),
+                                    'wind_direction': row.get('WD2M'),
+                                    'solar_radiation': row.get('CLRSKY_SFC_PAR_TOT'),
+                                    'uva': row.get('ALLSKY_SFC_UVA'),
+                                    'uvb': row.get('ALLSKY_SFC_UVB'),
+                                    'gwettop': row.get('GWETTOP')
+                                }
+                                env_records.append(record)
+                            
+                            results['environmental'] = bulk_create_environmental_data(env_records, user['username'])
+                        
+                        # Import Pest Data
+                        if import_pest and len(domains['pest']) > 0:
+                            pest_prepared = prepare_for_database(
+                                domains['pest'],
+                                selected_area_point,
+                                user['username']
+                            )
+                            results['pest'] = bulk_import_pest_data(pest_prepared, selected_area_point, user['username'])
+                        
+                        # Update upload status
+                        update_dataset_upload(upload_id, {'processing_status': 'completed'})
+                        
+                        # Log activity
+                        log_activity(
+                            user=user['username'],
+                            action='upload',
+                            module='dataset',
+                            entity_type='dataset_uploads',
+                            entity_id=upload_id,
+                            details={
+                                'area_point_id': selected_area_point,
+                                'filename': uploaded_file.name,
+                                'results': results
+                            }
+                        )
+                        
+                        st.success("✅ Dataset imported successfully!")
+                        
+                        # Show results
+                        if results['environmental']:
+                            st.info(f"📊 Environmental: {results['environmental']['success']} success, {results['environmental']['failed']} failed")
+                        if results['pest']:
+                            st.info(f"🐛 Pest: {results['pest']['success']} success, {results['pest']['failed']} failed")
+        
+        except Exception as e:
+            st.error(f"❌ Error processing file: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
 
 # ============================================================================
 # MONITORING POINTS PAGE - Admin and Encoder only
@@ -2031,6 +2466,225 @@ elif page == "Settings":
             else:
                 st.session_state.confirm_clear = True
                 st.warning("Click again to confirm clearing all data")
+
+# ============================================================================
+# ACTIVITY LOGS PAGE - Admin only
+# ============================================================================
+elif page == "📋 Activity Logs":
+    from utils.database import get_activity_logs
+    
+    st.markdown("## 📋 Activity Logs")
+    st.markdown("View all user activities and system events.")
+    
+    # Admin-only access
+    if user['role'] not in ['super_admin', 'admin']:
+        st.error("❌ Access Denied! Only Super Admin and Admin can view activity logs.")
+        st.stop()
+    
+    # Filters
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        filter_user = st.selectbox("User", ["All"] + list(get_activity_logs()['user'].unique()) if len(get_activity_logs()) > 0 else ["All"])
+    with col2:
+        filter_module = st.selectbox("Module", ["All", "dataset", "environmental", "pest", "area_point", "auth", "settings"])
+    with col3:
+        filter_action = st.selectbox("Action", ["All", "create", "read", "update", "delete", "upload", "login", "logout"])
+    with col4:
+        limit = st.number_input("Limit", min_value=10, max_value=1000, value=100)
+    
+    # Get logs
+    logs_df = get_activity_logs(
+        user=None if filter_user == "All" else filter_user,
+        module=None if filter_module == "All" else filter_module,
+        action=None if filter_action == "All" else filter_action,
+        limit=limit
+    )
+    
+    if len(logs_df) > 0:
+        st.markdown(f"**Total Logs:** {len(logs_df)}")
+        st.dataframe(logs_df, use_container_width=True, hide_index=True)
+        
+        # Export
+        csv = logs_df.to_csv(index=False)
+        st.download_button("📥 Export Logs", csv, "activity_logs.csv", "text/csv")
+    else:
+        st.info("No activity logs found.")
+
+# ============================================================================
+# VISUALIZATIONS PAGE
+# ============================================================================
+elif page == "📊 Visualizations":
+    from utils.visualizations import (
+        create_pest_density_chart, create_pest_shape_plot,
+        create_pest_vs_climate_timeseries, create_weekly_pest_pattern
+    )
+    from utils.database import read_records, get_area_points
+    
+    st.markdown("## 📊 Advanced Visualizations")
+    
+    # Get data
+    pest_df = read_records("pest_records")
+    env_df = read_records("environmental_data")
+    area_points = get_area_points()
+    
+    if len(pest_df) == 0:
+        st.warning("No pest data available. Add data to see visualizations.")
+        st.stop()
+    
+    # Filters
+    st.markdown("### Filters")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if 'area_point_id' in pest_df.columns:
+            area_filter = st.multiselect("Area Points", pest_df['area_point_id'].unique())
+            if area_filter:
+                pest_df = pest_df[pest_df['area_point_id'].isin(area_filter)]
+    
+    with col2:
+        if 'pest_type' in pest_df.columns:
+            pest_type_filter = st.selectbox("Pest Type", ["All", "rbb", "wsb"])
+            if pest_type_filter != "All":
+                pest_df = pest_df[pest_df['pest_type'] == pest_type_filter]
+    
+    with col3:
+        date_range = st.date_input("Date Range", [])
+    
+    # Visualizations
+    tab1, tab2, tab3, tab4 = st.tabs(["Density", "Distribution Shape", "Pest vs Climate", "Weekly Patterns"])
+    
+    with tab1:
+        st.markdown("### Pest Density Distribution")
+        if 'density' in pest_df.columns:
+            fig = create_pest_density_chart(pest_df, pest_type_filter if pest_type_filter != "All" else None)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No density data available.")
+    
+    with tab2:
+        st.markdown("### Population Distribution Shape")
+        if 'pest_type' in pest_df.columns and 'count' in pest_df.columns:
+            fig = create_pest_shape_plot(pest_df)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Missing required columns for shape plot.")
+    
+    with tab3:
+        st.markdown("### Pest Population vs Climate")
+        if len(env_df) > 0:
+            climate_var = st.selectbox("Climate Variable", ["temperature", "humidity", "precipitation", "wind_speed"])
+            pest_type_select = st.selectbox("Pest", ["rbb", "wsb"], key="climate_pest")
+            
+            fig = create_pest_vs_climate_timeseries(pest_df, env_df, pest_type_select, climate_var)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Not enough data to create time series comparison.")
+        else:
+            st.info("No environmental data available.")
+    
+    with tab4:
+        st.markdown("### Weekly Pest Patterns")
+        if 'week_number' in pest_df.columns:
+            fig = create_weekly_pest_pattern(pest_df, pest_type_filter if pest_type_filter != "All" else None)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Week number data not available.")
+
+# ============================================================================
+# ENVIRONMENTAL DATA PAGE
+# ============================================================================
+elif page == "🌡️ Environmental Data":
+    from utils.database import get_environmental_data, create_environmental_data, get_area_points, log_activity
+    from utils.data_processing import validate_environmental_data
+    
+    st.markdown("## 🌡️ Environmental Data Management")
+    
+    # Role check
+    if user['role'] not in ['super_admin', 'admin', 'encoder']:
+        st.error("❌ Access Denied!")
+        st.stop()
+    
+    tabs = st.tabs(["📋 View Data", "➕ Add Manual Entry"])
+    
+    with tabs[0]:
+        st.markdown("### Environmental Records")
+        
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        
+        area_points = get_area_points()
+        with col1:
+            if len(area_points) > 0:
+                area_filter = st.selectbox("Area Point", ["All"] + list(area_points['area_point_id']))
+            else:
+                st.warning("No area points available.")
+                st.stop()
+        
+        with col2:
+            source_filter = st.selectbox("Source", ["All", "nasa_power", "microclimate", "manual"])
+        
+        # Get data
+        env_df = get_environmental_data(
+            area_point_id=None if area_filter == "All" else area_filter,
+            source=None if source_filter == "All" else source_filter
+        )
+        
+        if len(env_df) > 0:
+            st.markdown(f"**Total Records:** {len(env_df)}")
+            st.dataframe(env_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No environmental data found.")
+    
+    with tabs[1]:
+        st.markdown("### Add Manual Microclimate Entry")
+        
+        if len(area_points) == 0:
+            st.error("Create an area point first!")
+            st.stop()
+        
+        with st.form("manual_env_form"):
+            area_point_id = st.selectbox("Area Point*", area_points['area_point_id'])
+            date = st.date_input("Date*")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                temp = st.number_input("Temperature (°C)", value=25.0)
+                humidity = st.number_input("Humidity (%)", value=80.0)
+            with col2:
+                rainfall = st.number_input("Rainfall (mm)", value=0.0)
+                soil_temp = st.number_input("Soil Temperature (°C)", value=None)
+            
+            submitted = st.form_submit_button("💾 Save", type="primary")
+            
+            if submitted:
+                data = {
+                    'area_point_id': area_point_id,
+                    'date': str(date),
+                    'source': 'microclimate',
+                    'temperature': temp,
+                    'humidity': humidity,
+                    'precipitation': rainfall,
+                    'soil_temp': soil_temp,
+                    'created_by': user['username']
+                }
+                
+                validation = validate_environmental_data(data)
+                if validation['valid']:
+                    try:
+                        create_environmental_data(data)
+                        log_activity(user['username'], 'create', 'environmental', 'environmental_data', area_point_id)
+                        st.success("✅ Data saved!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+                else:
+                    for error in validation['errors']:
+                        st.error(error)
 
 st.sidebar.divider()
 st.sidebar.info(
